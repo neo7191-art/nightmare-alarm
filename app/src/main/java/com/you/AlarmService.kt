@@ -3,6 +3,7 @@ package com.you.nightmarealarm
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -22,7 +23,10 @@ class AlarmService : Service() {
         super.onCreate()
         alarm = LoudAlarmController(this)
 
-        watcher = SoundWatcher(thresholdDb = 65.0) {
+        val prefs = getSharedPreferences("nightmare_prefs", Context.MODE_PRIVATE)
+        val threshold = prefs.getInt("threshold_db", 65).toDouble()
+
+        watcher = SoundWatcher(thresholdDb = threshold) {
             handler.post {
                 if (!alarmActive) {
                     alarmActive = true
