@@ -36,7 +36,7 @@ jobs:
       run: chmod +x gradlew
 
     - name: Build Debug APK
-      run: gradle assembleDebug
+      run: gradle wrapper --gradle-version 8.2 --no-daemon && ./gradlew assembleDebug --no-daemon
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
