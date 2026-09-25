@@ -1,5 +1,6 @@
 package com.you.nightmarealarm
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -18,30 +19,70 @@ class AlarmService : Service() {
     private lateinit var alarm: LoudAlarmController
     private val handler = Handler(Looper.getMainLooper())
     private var alarmActive = false
+    private var monitorStarted = false
+    private var delayMinutes = 0
+    private var remainingSeconds = 0L
 
     override fun onCreate() {
         super.onCreate()
         alarm = LoudAlarmController(this)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        createChannel()
 
         val prefs = getSharedPreferences("nightmare_prefs", Context.MODE_PRIVATE)
         val threshold = prefs.getInt("threshold_db", 65).toDouble()
+        val delayEnabled = prefs.getBoolean("delay_enabled", false)
+        delayMinutes = if (delayEnabled) prefs.getInt("delay_minutes", 60) else 0
 
         watcher = SoundWatcher(thresholdDb = threshold) {
             handler.post {
                 if (!alarmActive) {
                     alarmActive = true
                     alarm.triggerAlarm()
-                    // NO auto-stop — alarm keeps going until service is stopped
                 }
             }
         }
+
+        if (delayMinutes > 0) {
+            remainingSeconds = delayMinutes.toLong() * 60L
+            updateNotification("Waiting $delayMinutes min before monitoring...")
+            startCountdown()
+        } else {
+            startMonitoring()
+        }
+
+        return START_STICKY
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        createChannel()
+    private fun startCountdown() {
+        handler.post(object : Runnable {
+            override fun run() {
+                if (remainingSeconds <= 0) {
+                    startMonitoring()
+                    return
+                }
+                val min = remainingSeconds / 60
+                val sec = remainingSeconds % 60
+                updateNotification("Monitoring starts in %02d:%02d".format(min, sec))
+                remainingSeconds -= 5
+                handler.postDelayed(this, 5000)
+            }
+        })
+    }
+
+    private fun startMonitoring() {
+        if (monitorStarted) return
+        monitorStarted = true
+        updateNotification("Listening for vocalizations...")
+        watcher.start()
+    }
+
+    private fun updateNotification(text: String) {
         val notif = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Nightmare Alarm active")
-            .setContentText("Listening for vocalizations...")
+            .setContentTitle("Nightmare Alarm")
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
             .setOngoing(true)
             .build()
@@ -51,14 +92,11 @@ class AlarmService : Service() {
         } else {
             startForeground(1, notif)
         }
-
-        watcher.start()
-        return START_STICKY
     }
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
-        try { watcher.stop() } catch (_: Exception) {}
+        try { if (monitorStarted) watcher.stop() } catch (_: Exception) {}
         try { alarm.stopAlarm() } catch (_: Exception) {}
         super.onDestroy()
     }
