@@ -56,7 +56,6 @@ class LoudAlarmController(private val context: Context) {
                     start()
                 }
             } catch (_: Exception) {
-                // fallback to default alarm
                 val fallback = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                 player = MediaPlayer().apply {
                     setAudioAttributes(attrs)
@@ -69,6 +68,7 @@ class LoudAlarmController(private val context: Context) {
         }
 
         // Vibrate if mode is vibrate or both
+        // Continuous vibration until stopped — 0 repeats forever
         if (mode == "vibrate" || mode == "both") {
             vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
@@ -78,7 +78,8 @@ class LoudAlarmController(private val context: Context) {
                 context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
             }
 
-            val pattern = longArrayOf(0, 800, 400, 800, 400)
+            // Long pattern that repeats from index 0 (loops forever)
+            val pattern = longArrayOf(0, 1000, 500, 1000, 500, 1000, 500)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0))
             } else {
