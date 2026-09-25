@@ -31,10 +31,7 @@ class AlarmService : Service() {
                 if (!alarmActive) {
                     alarmActive = true
                     alarm.triggerAlarm()
-                    handler.postDelayed({
-                        alarm.stopAlarm()
-                        alarmActive = false
-                    }, 15_000)
+                    // NO auto-stop — alarm keeps going until service is stopped
                 }
             }
         }
