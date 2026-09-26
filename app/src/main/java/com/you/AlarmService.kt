@@ -5,16 +5,15 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.app.NotificationCompat
 
 class AlarmService : Service() {
@@ -25,30 +24,39 @@ class AlarmService : Service() {
     private var alarmActive = false
     private var monitorStarted = false
 
-    private val startReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == ACTION_START_MONITORING) {
-                if (::watcher.isInitialized) startMonitoring()
-            }
-        }
-    }
-
     override fun onCreate() {
         super.onCreate()
+        Log.d(TAG, "onCreate")
         alarm = LoudAlarmController(this)
-
-        val filter = IntentFilter(ACTION_START_MONITORING)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(startReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("UnspecifiedRegisterReceiverFlag")
-            registerReceiver(startReceiver, filter)
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createChannel()
 
+        val action = intent?.action
+        Log.d(TAG, "onStartCommand action=$action monitorStarted=$monitorStarted")
+
+        // If triggered by AlarmManager (delayed start), start monitoring NOW
+        if (action == ACTION_START_MONITORING) {
+            Log.d(TAG, "AlarmManager fired — starting monitoring")
+            if (!::watcher.isInitialized) {
+                // Service was killed and restarted — recreate watcher
+                val prefs = getSharedPreferences("nightmare_prefs", Context.MODE_PRIVATE)
+                val threshold = prefs.getInt("threshold_db", 65).toDouble()
+                watcher = SoundWatcher(thresholdDb = threshold) {
+                    handler.post {
+                        if (!alarmActive) {
+                            alarmActive = true
+                            alarm.triggerAlarm()
+                        }
+                    }
+                }
+            }
+            startMonitoring()
+            return START_STICKY
+        }
+
+        // Already monitoring — just refresh notification
         if (monitorStarted) {
             updateNotification("Listening for vocalizations...")
             return START_STICKY
@@ -58,6 +66,7 @@ class AlarmService : Service() {
         val threshold = prefs.getInt("threshold_db", 65).toDouble()
         val delayEnabled = prefs.getBoolean("delay_enabled", false)
         val delayMinutes = if (delayEnabled) prefs.getInt("delay_minutes", 60) else 0
+        Log.d(TAG, "threshold=$threshold delayEnabled=$delayEnabled delayMinutes=$delayMinutes")
 
         watcher = SoundWatcher(thresholdDb = threshold) {
             handler.post {
@@ -70,7 +79,11 @@ class AlarmService : Service() {
 
         if (delayMinutes > 0) {
             scheduleDelayedStart(delayMinutes)
-            updateNotification("Monitoring starts in $delayMinutes min")
+            val until = System.currentTimeMillis() + delayMinutes.toLong() * 60_000L
+            val timeStr = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                .format(java.util.Date(until))
+            updateNotification("Monitoring starts at $timeStr")
+            Log.d(TAG, "Scheduled for $delayMinutes min later at $timeStr")
         } else {
             startMonitoring()
         }
@@ -102,7 +115,9 @@ class AlarmService : Service() {
             } else {
                 am.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAtMillis, pi)
             }
-        } catch (_: SecurityException) {
+            Log.d(TAG, "Exact alarm scheduled")
+        } catch (e: SecurityException) {
+            Log.d(TAG, "Falling back to inexact alarm: ${e.message}")
             am.setAndAllowWhileIdle(
                 AlarmManager.ELAPSED_REALTIME_WAKEUP,
                 triggerAtMillis,
@@ -115,6 +130,7 @@ class AlarmService : Service() {
         if (monitorStarted) return
         if (!::watcher.isInitialized) return
         monitorStarted = true
+        Log.d(TAG, "startMonitoring — mic now active")
         updateNotification("Listening for vocalizations...")
         watcher.start()
     }
@@ -135,8 +151,8 @@ class AlarmService : Service() {
     }
 
     override fun onDestroy() {
+        Log.d(TAG, "onDestroy")
         handler.removeCallbacksAndMessages(null)
-        try { unregisterReceiver(startReceiver) } catch (_: Exception) {}
         try { if (monitorStarted && ::watcher.isInitialized) watcher.stop() } catch (_: Exception) {}
         try { alarm.stopAlarm() } catch (_: Exception) {}
         super.onDestroy()
@@ -161,5 +177,6 @@ class AlarmService : Service() {
     companion object {
         const val CHANNEL_ID = "nightmare_alarm_channel"
         const val ACTION_START_MONITORING = "com.you.nightmarealarm.START_MONITORING"
+        const val TAG = "NightmareAlarm"
     }
 }
