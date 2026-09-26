@@ -1,16 +1,20 @@
 package com.you.nightmarealarm
 
-import android.app.Notification
+import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 
 class AlarmService : Service() {
@@ -20,21 +24,40 @@ class AlarmService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var alarmActive = false
     private var monitorStarted = false
-    private var delayMinutes = 0
-    private var remainingSeconds = 0L
+
+    private val startReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ACTION_START_MONITORING) {
+                if (::watcher.isInitialized) startMonitoring()
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         alarm = LoudAlarmController(this)
+
+        val filter = IntentFilter(ACTION_START_MONITORING)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(startReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(startReceiver, filter)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createChannel()
 
+        if (monitorStarted) {
+            updateNotification("Listening for vocalizations...")
+            return START_STICKY
+        }
+
         val prefs = getSharedPreferences("nightmare_prefs", Context.MODE_PRIVATE)
         val threshold = prefs.getInt("threshold_db", 65).toDouble()
         val delayEnabled = prefs.getBoolean("delay_enabled", false)
-        delayMinutes = if (delayEnabled) prefs.getInt("delay_minutes", 60) else 0
+        val delayMinutes = if (delayEnabled) prefs.getInt("delay_minutes", 60) else 0
 
         watcher = SoundWatcher(thresholdDb = threshold) {
             handler.post {
@@ -46,9 +69,8 @@ class AlarmService : Service() {
         }
 
         if (delayMinutes > 0) {
-            remainingSeconds = delayMinutes.toLong() * 60L
-            updateNotification("Waiting $delayMinutes min before monitoring...")
-            startCountdown()
+            scheduleDelayedStart(delayMinutes)
+            updateNotification("Monitoring starts in $delayMinutes min")
         } else {
             startMonitoring()
         }
@@ -56,24 +78,42 @@ class AlarmService : Service() {
         return START_STICKY
     }
 
-    private fun startCountdown() {
-        handler.post(object : Runnable {
-            override fun run() {
-                if (remainingSeconds <= 0) {
-                    startMonitoring()
-                    return
-                }
-                val min = remainingSeconds / 60
-                val sec = remainingSeconds % 60
-                updateNotification("Monitoring starts in %02d:%02d".format(min, sec))
-                remainingSeconds -= 5
-                handler.postDelayed(this, 5000)
+    private fun scheduleDelayedStart(delayMinutes: Int) {
+        val triggerAtMillis = SystemClock.elapsedRealtime() + delayMinutes.toLong() * 60_000L
+
+        val intent = Intent(this, AlarmService::class.java).apply {
+            action = ACTION_START_MONITORING
+        }
+        val piFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val pi = PendingIntent.getService(this, 42, intent, piFlags)
+
+        val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                am.setExactAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerAtMillis,
+                    pi
+                )
+            } else {
+                am.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAtMillis, pi)
             }
-        })
+        } catch (_: SecurityException) {
+            am.setAndAllowWhileIdle(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                triggerAtMillis,
+                pi
+            )
+        }
     }
 
     private fun startMonitoring() {
         if (monitorStarted) return
+        if (!::watcher.isInitialized) return
         monitorStarted = true
         updateNotification("Listening for vocalizations...")
         watcher.start()
@@ -96,7 +136,8 @@ class AlarmService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
-        try { if (monitorStarted) watcher.stop() } catch (_: Exception) {}
+        try { unregisterReceiver(startReceiver) } catch (_: Exception) {}
+        try { if (monitorStarted && ::watcher.isInitialized) watcher.stop() } catch (_: Exception) {}
         try { alarm.stopAlarm() } catch (_: Exception) {}
         super.onDestroy()
     }
@@ -117,5 +158,8 @@ class AlarmService : Service() {
         }
     }
 
-    companion object { const val CHANNEL_ID = "nightmare_alarm_channel" }
+    companion object {
+        const val CHANNEL_ID = "nightmare_alarm_channel"
+        const val ACTION_START_MONITORING = "com.you.nightmarealarm.START_MONITORING"
+    }
 }
