@@ -27,7 +27,12 @@ class AlarmService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "onCreate")
-        alarm = LoudAlarmController(this)
+        alarm = LoudAlarmController(this) {
+            handler.post {
+                alarmActive = false
+                Log.d(TAG, "Alarm reset — waiting for next trigger")
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
