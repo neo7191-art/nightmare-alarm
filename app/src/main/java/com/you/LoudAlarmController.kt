@@ -15,9 +15,13 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
+import kotlin.math.abs
 import kotlin.math.sqrt
 
-class LoudAlarmController(private val context: Context) {
+class LoudAlarmController(
+    private val context: Context,
+    private val onShakeStop: () -> Unit = {}
+) {
 
     private var player: MediaPlayer? = null
     private var vibrator: Vibrator? = null
@@ -26,8 +30,7 @@ class LoudAlarmController(private val context: Context) {
     private var accelerometer: Sensor? = null
     private var shakeListener: SensorEventListener? = null
 
-    // Threshold: how much the phone must move to count as a shake.
-    // Higher = needs more vigorous shake. Tune between 10.0 and 25.0
+    // Tune: 8.0 = sensitive, 12.0 = default, 18.0 = firm shake
     private val SHAKE_THRESHOLD = 12.0f
 
     fun triggerAlarm() {
@@ -95,7 +98,6 @@ class LoudAlarmController(private val context: Context) {
             }
         }
 
-        // Start shake detector if enabled
         if (shakeEnabled) {
             startShakeDetector()
         }
@@ -106,7 +108,7 @@ class LoudAlarmController(private val context: Context) {
             sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
             accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
             if (accelerometer == null) {
-                Log.d("NightmareAlarm", "No accelerometer available")
+                Log.d("NightmareAlarm", "No accelerometer")
                 return
             }
 
@@ -120,16 +122,16 @@ class LoudAlarmController(private val context: Context) {
                     val y = event.values[1]
                     val z = event.values[2]
 
-                    // Remove gravity component (approx 9.81)
                     val gForce = sqrt((x * x + y * y + z * z).toDouble()).toFloat()
-                    val movement = kotlin.math.abs(gForce - SensorManager.GRAVITY_EARTH)
+                    val movement = abs(gForce - SensorManager.GRAVITY_EARTH)
 
                     if (movement > SHAKE_THRESHOLD) {
                         val now = System.currentTimeMillis()
                         if (now - lastShakeTime > 1500) {
                             lastShakeTime = now
-                            Log.d("NightmareAlarm", "Shake detected (movement=${movement}) — stopping alarm")
+                            Log.d("NightmareAlarm", "Shake detected ($movement) — stopping")
                             stopAlarm()
+                            onShakeStop()
                         }
                     }
                 }
@@ -142,7 +144,7 @@ class LoudAlarmController(private val context: Context) {
                 accelerometer,
                 SensorManager.SENSOR_DELAY_NORMAL
             )
-            Log.d("NightmareAlarm", "Shake detector registered")
+            Log.d("NightmareAlarm", "Shake detector active")
         } catch (e: Exception) {
             Log.d("NightmareAlarm", "Shake detector failed: ${e.message}")
         }
