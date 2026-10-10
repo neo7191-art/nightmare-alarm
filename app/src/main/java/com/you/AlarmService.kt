@@ -36,17 +36,16 @@ class AlarmService : Service() {
         val action = intent?.action
         Log.d(TAG, "onStartCommand action=$action monitorStarted=$monitorStarted")
 
-        // If triggered by AlarmManager (delayed start), start monitoring NOW
         if (action == ACTION_START_MONITORING) {
             Log.d(TAG, "AlarmManager fired — starting monitoring")
             if (!::watcher.isInitialized) {
-                // Service was killed and restarted — recreate watcher
                 val prefs = getSharedPreferences("nightmare_prefs", Context.MODE_PRIVATE)
                 val threshold = prefs.getInt("threshold_db", 65).toDouble()
                 watcher = SoundWatcher(thresholdDb = threshold) {
                     handler.post {
                         if (!alarmActive) {
                             alarmActive = true
+                            Log.d(TAG, "Threshold exceeded — alarm ON")
                             alarm.triggerAlarm()
                         }
                     }
@@ -56,7 +55,6 @@ class AlarmService : Service() {
             return START_STICKY
         }
 
-        // Already monitoring — just refresh notification
         if (monitorStarted) {
             updateNotification("Listening for vocalizations...")
             return START_STICKY
@@ -72,6 +70,7 @@ class AlarmService : Service() {
             handler.post {
                 if (!alarmActive) {
                     alarmActive = true
+                    Log.d(TAG, "Threshold exceeded — alarm ON")
                     alarm.triggerAlarm()
                 }
             }
@@ -109,8 +108,7 @@ class AlarmService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 am.setExactAndAllowWhileIdle(
                     AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    triggerAtMillis,
-                    pi
+                    triggerAtMillis, pi
                 )
             } else {
                 am.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAtMillis, pi)
@@ -119,9 +117,7 @@ class AlarmService : Service() {
         } catch (e: SecurityException) {
             Log.d(TAG, "Falling back to inexact alarm: ${e.message}")
             am.setAndAllowWhileIdle(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                triggerAtMillis,
-                pi
+                AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAtMillis, pi
             )
         }
     }
