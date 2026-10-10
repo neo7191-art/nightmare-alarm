@@ -24,6 +24,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var delayLabel: TextView
     private lateinit var delayBar: SeekBar
     private lateinit var shakeCheck: CheckBox
+    private lateinit var shakeLabel: TextView
+    private lateinit var shakeBar: SeekBar
     private lateinit var radioSound: RadioButton
     private lateinit var radioVibrate: RadioButton
     private lateinit var radioBoth: RadioButton
@@ -111,7 +113,36 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, 24, 0, 8)
             setOnCheckedChangeListener { _, checked ->
                 prefs.edit().putBoolean("shake_to_stop", checked).apply()
+                shakeBar.isEnabled = checked
             }
+        }
+
+        shakeLabel = TextView(this).apply {
+            val s = prefs.getInt("shake_sensitivity", 40)
+            text = "Shake sensitivity: ${sensitivityName(s)}"
+            textSize = 14f
+            setPadding(0, 8, 0, 4)
+        }
+
+        shakeBar = SeekBar(this).apply {
+            max = 130           // 20..150 → 2.0 to 15.0 (divide by 10)
+            progress = prefs.getInt("shake_sensitivity", 40) - 20
+            isEnabled = prefs.getBoolean("shake_to_stop", true)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) {
+                    val v = p + 20    // 20..150
+                    shakeLabel.text = "Shake sensitivity: ${sensitivityName(v)}"
+                    prefs.edit().putInt("shake_sensitivity", v).apply()
+                }
+                override fun onStartTrackingTouch(s: SeekBar?) {}
+                override fun onStopTrackingTouch(s: SeekBar?) {}
+            })
+        }
+
+        val shakeHint = TextView(this).apply {
+            text = "Lower = easier to trigger (light shake)\nHigher = needs firmer shake"
+            textSize = 11f
+            setPadding(0, 0, 0, 8)
         }
 
         // --- Output mode ---
@@ -204,6 +235,9 @@ class MainActivity : AppCompatActivity() {
         layout.addView(delayLabel)
         layout.addView(delayBar)
         layout.addView(shakeCheck)
+        layout.addView(shakeLabel)
+        layout.addView(shakeBar)
+        layout.addView(shakeHint)
         layout.addView(outputLabel)
         layout.addView(radioBoth)
         layout.addView(radioSound)
@@ -219,6 +253,16 @@ class MainActivity : AppCompatActivity() {
         setContentView(scroll)
 
         requestRuntimePermissions()
+    }
+
+    private fun sensitivityName(v: Int): String {
+        return when {
+            v <= 30 -> "Very light (${v/10.0})"
+            v <= 50 -> "Light (${v/10.0})"
+            v <= 80 -> "Medium (${v/10.0})"
+            v <= 110 -> "Firm (${v/10.0})"
+            else -> "Very firm (${v/10.0})"
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
