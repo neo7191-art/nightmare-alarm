@@ -23,6 +23,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var delayCheck: CheckBox
     private lateinit var delayLabel: TextView
     private lateinit var delayBar: SeekBar
+    private lateinit var shakeCheck: CheckBox
     private lateinit var radioSound: RadioButton
     private lateinit var radioVibrate: RadioButton
     private lateinit var radioBoth: RadioButton
@@ -101,6 +102,16 @@ class MainActivity : AppCompatActivity() {
                 override fun onStartTrackingTouch(s: SeekBar?) {}
                 override fun onStopTrackingTouch(s: SeekBar?) {}
             })
+        }
+
+        // --- Shake to stop ---
+        shakeCheck = CheckBox(this).apply {
+            text = "Shake phone to stop alarm"
+            isChecked = prefs.getBoolean("shake_to_stop", true)
+            setPadding(0, 24, 0, 8)
+            setOnCheckedChangeListener { _, checked ->
+                prefs.edit().putBoolean("shake_to_stop", checked).apply()
+            }
         }
 
         // --- Output mode ---
@@ -192,6 +203,7 @@ class MainActivity : AppCompatActivity() {
         layout.addView(delayCheck)
         layout.addView(delayLabel)
         layout.addView(delayBar)
+        layout.addView(shakeCheck)
         layout.addView(outputLabel)
         layout.addView(radioBoth)
         layout.addView(radioSound)
