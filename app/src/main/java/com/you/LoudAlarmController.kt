@@ -30,8 +30,14 @@ class LoudAlarmController(
     private var accelerometer: Sensor? = null
     private var shakeListener: SensorEventListener? = null
 
-    // Tune: 8.0 = sensitive, 12.0 = default, 18.0 = firm shake
-    private val SHAKE_THRESHOLD = 12.0f
+    // Shake sensitivity: LOWER = more sensitive (easier to trigger)
+    // Read from prefs, default = 4.0 (fairly sensitive, works with light shake)
+    // Range: 2.0 (very sensitive) to 15.0 (needs firm shake)
+    private val SHAKE_THRESHOLD: Float
+        get() {
+            val prefs = context.getSharedPreferences("nightmare_prefs", Context.MODE_PRIVATE)
+            return prefs.getInt("shake_sensitivity", 40) / 10.0f
+        }
 
     fun triggerAlarm() {
         stopAlarm()
@@ -122,14 +128,17 @@ class LoudAlarmController(
                     val y = event.values[1]
                     val z = event.values[2]
 
+                    // Total acceleration magnitude
                     val gForce = sqrt((x * x + y * y + z * z).toDouble()).toFloat()
+                    // Deviation from Earth's gravity (9.81 m/s²)
                     val movement = abs(gForce - SensorManager.GRAVITY_EARTH)
 
                     if (movement > SHAKE_THRESHOLD) {
                         val now = System.currentTimeMillis()
-                        if (now - lastShakeTime > 1500) {
+                        // Cooldown: 800ms — prevents multiple triggers from a single shake
+                        if (now - lastShakeTime > 800) {
                             lastShakeTime = now
-                            Log.d("NightmareAlarm", "Shake detected ($movement) — stopping")
+                            Log.d("NightmareAlarm", "Shake detected (movement=$movement, threshold=$SHAKE_THRESHOLD) — stopping alarm")
                             stopAlarm()
                             onShakeStop()
                         }
@@ -142,17 +151,23 @@ class LoudAlarmController(
             sensorManager?.registerListener(
                 shakeListener,
                 accelerometer,
-                SensorManager.SENSOR_DELAY_NORMAL
+                SensorManager.SENSOR_DELAY_GAME   // faster sampling = quicker detection
             )
-            Log.d("NightmareAlarm", "Shake detector active")
+            Log.d("NightmareAlarm", "Shake detector active (threshold=$SHAKE_THRESHOLD)")
         } catch (e: Exception) {
             Log.d("NightmareAlarm", "Shake detector failed: ${e.message}")
         }
     }
 
     fun stopAlarm() {
-        try { player?.stop() } catch (_: Exception) {}
-        try { player?.release() } catch (_: Exception) {}
+        // Fully stop and release the sound — no pause, no resume
+        try {
+            player?.let {
+                if (it.isPlaying) it.stop()
+                it.reset()
+                it.release()
+            }
+        } catch (_: Exception) {}
         player = null
 
         try { vibrator?.cancel() } catch (_: Exception) {}
@@ -162,5 +177,6 @@ class LoudAlarmController(
             shakeListener?.let { sensorManager?.unregisterListener(it) }
         } catch (_: Exception) {}
         shakeListener = null
+        sensorManager = null
     }
 }
